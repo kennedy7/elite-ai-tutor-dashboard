@@ -33,7 +33,7 @@ export default function DashboardPage() {
 
     try {
       const { reply } = await callAiChat(prompt);
-      setAnswer(reply);
+      setAnswer(reply ?? "");
     } catch (err: any) {
       setAnswer("Error: " + (err?.message ?? JSON.stringify(err)));
     }
