@@ -52,6 +52,8 @@ export default function AiChat() {
     fetchSessions();
   }, [user]);
 
+
+  //Sending a message
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
 
