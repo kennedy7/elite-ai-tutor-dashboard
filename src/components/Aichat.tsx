@@ -17,7 +17,56 @@ import {
 import { getAuth } from "firebase/auth";
 import { app } from "@/lib/firebase";
 import LogoutButton from "@/components/LogoutButton";
+import toast, { Toaster } from "react-hot-toast";
 
+
+
+/* ---------- simple offline queue (localStorage) ---------- */
+const QUEUE_KEY = "ai_session_save_queue_v1";
+
+type QueueItem = {
+  id: string;
+  payload: {
+    userId: string;
+    sessionId?: string;
+    messages: any[];
+  };
+  createdAt: number;
+  retries?: number;
+};
+
+function readQueue(): QueueItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(QUEUE_KEY);
+    return raw ? (JSON.parse(raw) as QueueItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+function writeQueue(q: QueueItem[]) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
+}
+function enqueueQueue(payload: QueueItem["payload"]) {
+  const q = readQueue();
+  const item: QueueItem = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    payload,
+    createdAt: Date.now(),
+    retries: 0,
+  };
+  q.push(item);
+  writeQueue(q);
+  return item.id;
+}
+function dequeueQueue(id: string) {
+  const q = readQueue();
+  const filtered = q.filter((i) => i.id !== id);
+  writeQueue(filtered);
+}
+
+/* ---------- component ---------- */
 interface Message {
   role: "user" | "ai";
   text: string;
@@ -59,10 +108,7 @@ export default function AiChat() {
 
     const fetchSessions = async () => {
       try {
-        const q = query(
-          collection(db, "users", user.uid, "sessions"),
-          orderBy("createdAt", "desc")
-        );
+        const q = query(collection(db, "users", user.uid, "sessions"), orderBy("createdAt", "desc"));
         const snapshot = await getDocs(q);
         const loaded: Session[] = snapshot.docs.map((d) => {
           const data = d.data() as DocumentData;
@@ -76,10 +122,71 @@ export default function AiChat() {
         setSessions(loaded);
       } catch (err) {
         console.error("Failed to fetch sessions:", err);
+        toast.error("Failed to load sessions. Check console.");
       }
     };
 
     fetchSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  // Flush queued saves (attempt to write any queued items to Firestore)
+  useEffect(() => {
+    if (!user) return;
+    let mounted = true;
+
+    async function flushQueue() {
+      const q = readQueue();
+      if (!q.length) return;
+      for (const item of q) {
+        try {
+          if (!mounted) return;
+          const { userId, sessionId, messages } = item.payload;
+          if (!userId) {
+            dequeueQueue(item.id);
+            continue;
+          }
+          if (sessionId) {
+            const sessionRef = doc(db, "users", userId, "sessions", sessionId);
+            await updateDoc(sessionRef, { messages, updatedAt: serverTimestamp() });
+          } else {
+            const sessionsCol = collection(db, "users", userId, "sessions");
+            await addDoc(sessionsCol, {
+              name: `Session ${new Date().toLocaleString()}`,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+              messages,
+            });
+          }
+          dequeueQueue(item.id);
+          toast.success("Queued session saved");
+        } catch (err) {
+          console.warn("Retry failed for queued item", item.id, err);
+          // increment retry count
+          const current = readQueue();
+          const updated = current.map((it) => (it.id === item.id ? { ...it, retries: (it.retries || 0) + 1 } : it));
+          writeQueue(updated);
+          // If retries too many, drop it to avoid infinite loop
+          const updatedItem = updated.find((it) => it.id === item.id);
+          if ((updatedItem?.retries ?? 0) > 5) {
+            dequeueQueue(item.id);
+            toast.error("Dropped a queued save after several failed attempts");
+          }
+        }
+      }
+    }
+
+    // flush now
+    flushQueue();
+
+    // flush when online
+    const onOnline = () => flushQueue();
+    window.addEventListener("online", onOnline);
+
+    return () => {
+      mounted = false;
+      window.removeEventListener("online", onOnline);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -109,11 +216,10 @@ export default function AiChat() {
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      // replace with toast if you have one
-      // eslint-disable-next-line no-alert
-      alert("Copied to clipboard");
+      toast.success("Copied to clipboard");
     } catch (err) {
       console.error("Copy failed", err);
+      toast.error("Copy failed");
     }
   };
 
@@ -121,6 +227,7 @@ export default function AiChat() {
   const saveOrCreateSession = async (messagesToSave: Message[], sessionId?: string) => {
     if (!user) {
       console.warn("No user: session not saved");
+      toast.error("Sign in to save sessions");
       return null;
     }
 
@@ -131,6 +238,7 @@ export default function AiChat() {
           messages: messagesToSave,
           updatedAt: serverTimestamp(),
         });
+        toast.success("Session updated");
         return sessionId;
       } else {
         const sessionsCol = collection(db, "users", user.uid, "sessions");
@@ -140,10 +248,19 @@ export default function AiChat() {
           updatedAt: serverTimestamp(),
           messages: messagesToSave,
         });
+        toast.success("Session created");
         return (docRef as DocumentReference).id;
       }
     } catch (err) {
       console.error("saveOrCreateSession error:", err);
+      // enqueue for offline retry
+      try {
+        enqueueQueue({ userId: user.uid, sessionId, messages: messagesToSave });
+        toast("Saved to offline queue — will retry when online", { icon: "💾" });
+      } catch (queueErr) {
+        console.error("Failed to enqueue session save", queueErr);
+        toast.error("Failed to save session (and enqueue). Check console.");
+      }
       return null;
     }
   };
@@ -151,7 +268,7 @@ export default function AiChat() {
   // Start a brand new session (creates empty session doc, selects it)
   const startNewSession = async () => {
     if (!user) {
-      alert("You must be signed in to create a session.");
+      toast.error("You must be signed in to create a session.");
       return;
     }
     setMessages([]);
@@ -168,9 +285,11 @@ export default function AiChat() {
       setCurrentSessionId(newId);
       // Prepend new session to local list
       setSessions((prev) => [{ id: newId, createdAt: new Date(), messages: [], name: `Session ${new Date().toLocaleString()}` }, ...prev]);
+      toast.success("New session started");
     } catch (err) {
       console.error("Failed to start new session:", err);
-      alert("Could not start new session. Check console.");
+      // enqueue empty session creation? simpler: notify user
+      toast.error("Could not start new session. Check console.");
     }
   };
 
@@ -209,7 +328,7 @@ export default function AiChat() {
       setMessages(newMessages);
       messagesRef.current = newMessages;
 
-      // Save/append to Firestore session
+      // Save/append to Firestore session, fallback to offline queue on failure
       const savedId = await saveOrCreateSession(newMessages, currentSessionId);
       if (savedId && !currentSessionId) {
         setCurrentSessionId(savedId);
@@ -232,6 +351,7 @@ export default function AiChat() {
       console.error("AI Chat Error:", err);
       setMessages((prev) => [...prev, { role: "ai", text: "⚠️ An error occurred while contacting the AI service.", createdAt: new Date().toISOString() }]);
       messagesRef.current = messagesRef.current.concat({ role: "ai", text: "⚠️ An error occurred while contacting the AI service.", createdAt: new Date().toISOString() });
+      toast.error("AI service error");
     } finally {
       setInput("");
       setLoading(false);
@@ -246,6 +366,7 @@ export default function AiChat() {
     setMessages(session.messages);
     messagesRef.current = session.messages;
     setCurrentSessionId(session.id);
+    toast("Session loaded");
   };
 
   const deleteSession = async (sessionId: string) => {
@@ -262,9 +383,11 @@ export default function AiChat() {
         messagesRef.current = [];
         setCurrentSessionId(undefined);
       }
+      toast.success("Session deleted");
     } catch (err) {
       console.error("Error deleting session:", err);
-      alert("Could not delete session. Check console.");
+      // if delete fails, enqueue? we'll just notify
+      toast.error("Could not delete session. Check console.");
     }
   };
 
@@ -278,9 +401,10 @@ export default function AiChat() {
       const sessionRef = doc(db, "users", user.uid, "sessions", sessionId);
       await updateDoc(sessionRef, { name: newName, updatedAt: serverTimestamp() });
       setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, name: newName } : s)));
+      toast.success("Session renamed");
     } catch (err) {
       console.error("Error renaming session:", err);
-      alert("Could not rename session. Check console.");
+      toast.error("Could not rename session. Check console.");
     }
   };
 
@@ -411,6 +535,9 @@ export default function AiChat() {
           </button>
         </div>
       </main>
+
+      {/* Toast container (react-hot-toast) */}
+      <Toaster position="bottom-right" />
     </div>
   );
 }
