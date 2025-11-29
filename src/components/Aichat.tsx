@@ -94,14 +94,14 @@ export default function AiChat() {
       console.error("AI Chat Error:", error);
       setMessages((prev) => [
         ...prev,
-        { role: "ai", text: "⚠️ An error occurred while contacting the AI service." },
+        { role: "ai", text: "⚠️ An error occurred while contacting the AI service, check your internet provider and try again." },
       ]);
     }
 
     setInput("");
     setLoading(false);
   };
-
+//Pressing Enter triggers sending a message
   const onKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") sendMessage();
   };
