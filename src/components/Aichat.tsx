@@ -1,7 +1,8 @@
+// src/components/AiChat.tsx
 import { useState, useRef, useEffect } from "react";
-import { getFirestore, collection, addDoc, query, orderBy, getDocs } from "firebase/firestore";
-import { getApp } from "firebase/app";
-import { useAuth } from "@/hooks/useAuth"; // your Firebase auth hook
+import { getFirestore, collection, addDoc, query, orderBy, getDocs, deleteDoc, doc } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
+import { app } from "@/lib/firebase"; // your firebase app initialization
 
 interface Message {
   role: "user" | "ai";
@@ -10,57 +11,46 @@ interface Message {
 
 interface Session {
   id: string;
-  name: string;
+  createdAt: Date;
   messages: Message[];
-  createdAt: string;
 }
 
 export default function AiChat() {
-  const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [sessions, setSessions] = useState<Session[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const db = getFirestore(getApp());
 
-  // Auto-scroll
+  const db = getFirestore(app);
+  const user = getAuth().currentUser;
+
+  // Auto-scroll on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Fetch sessions from Firestore
+  // Load sessions on mount
   useEffect(() => {
     if (!user) return;
 
     const fetchSessions = async () => {
-      const sessionsRef = collection(db, "users", user.uid, "sessions");
-      const q = query(sessionsRef, orderBy("createdAt", "desc"));
+      const q = query(
+        collection(db, "users", user.uid, "sessions"),
+        orderBy("createdAt", "desc")
+      );
       const snapshot = await getDocs(q);
-      const fetched: Session[] = snapshot.docs.map((doc) => ({
+      const loaded: Session[] = snapshot.docs.map((doc) => ({
         id: doc.id,
-        ...(doc.data() as Omit<Session, "id">),
+        createdAt: doc.data().createdAt.toDate(),
+        messages: doc.data().messages,
       }));
-      setSessions(fetched);
+      setSessions(loaded);
     };
 
     fetchSessions();
   }, [user]);
-
-  const saveSession = async (messagesToSave: Message[]) => {
-    if (!user) return;
-    try {
-      const sessionsRef = collection(db, "users", user.uid, "sessions");
-      const docRef = await addDoc(sessionsRef, {
-        name: `Session ${new Date().toLocaleString()}`,
-        createdAt: new Date(),
-        messages: messagesToSave,
-      });
-      setSessions((prev) => [{ id: docRef.id, name: `Session ${new Date().toLocaleString()}`, messages: messagesToSave, createdAt: new Date().toISOString() }, ...prev]);
-    } catch (error) {
-      console.error("Error saving session:", error);
-    }
-  };
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
@@ -75,70 +65,101 @@ export default function AiChat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: input.trim(),
-          context:
-            "You are an AI tutor helping the student learn clearly and concisely.",
+          context: "You are an AI tutor helping the student learn clearly and concisely.",
         }),
       });
 
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
 
       const data: { reply: string } = await res.json();
+      const aiMessage: Message = { role: "ai", text: data.reply || "No response from AI." };
 
-      const aiMessage: Message = {
-        role: "ai",
-        text: data.reply || "Sorry, I couldn't generate a response.",
-      };
+      setMessages((prev) => [...prev, aiMessage]);
 
-      const newMessages = [...messages, userMessage, aiMessage];
-      setMessages(newMessages);
+      // Save session
+      if (user) {
+        const messagesToSave = [...messages, userMessage, aiMessage];
+        const sessionRef = currentSessionId
+          ? doc(db, "users", user.uid, "sessions", currentSessionId)
+          : await addDoc(collection(db, "users", user.uid, "sessions"), {
+              createdAt: new Date(),
+              messages: messagesToSave,
+            });
 
-      // Save session to Firestore
-      await saveSession(newMessages);
+        if (!currentSessionId) setCurrentSessionId(sessionRef.id);
+      }
     } catch (error) {
-      const errorMessage: Message = {
-        role: "ai",
-        text: "⚠️ An error occurred while contacting the AI service.",
-      };
-      setMessages((prev) => [...prev, errorMessage]);
       console.error("AI Chat Error:", error);
+      setMessages((prev) => [
+        ...prev,
+        { role: "ai", text: "⚠️ An error occurred while contacting the AI service." },
+      ]);
     }
 
     setInput("");
     setLoading(false);
   };
 
+  const onKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") sendMessage();
+  };
+
   const loadSession = (session: Session) => {
     setMessages(session.messages);
+    setCurrentSessionId(session.id);
+  };
+
+  const deleteSession = async (sessionId: string) => {
+    if (!user) return;
+    if (!confirm("Are you sure you want to delete this session?")) return;
+
+    try {
+      await deleteDoc(doc(db, "users", user.uid, "sessions", sessionId));
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+
+      // Clear chat if deleted session is currently loaded
+      if (currentSessionId === sessionId) {
+        setMessages([]);
+        setCurrentSessionId(null);
+      }
+    } catch (error) {
+      console.error("Error deleting session:", error);
+    }
   };
 
   return (
-    <div className="flex h-full gap-4">
-      {/* Sessions List */}
-      <div className="w-64 bg-gray-50 p-2 border rounded overflow-y-auto">
-        <h3 className="font-semibold mb-2">Past Sessions</h3>
-        {sessions.length === 0 && <p className="text-sm text-gray-500">No sessions yet</p>}
-        <ul className="space-y-1">
-          {sessions.map((s) => (
+    <div className="flex flex-col md:flex-row w-full max-w-5xl mx-auto p-4 gap-4">
+      {/* Sidebar: Sessions */}
+      <div className="w-full md:w-64 bg-gray-50 p-3 rounded-md shadow-md overflow-y-auto max-h-[500px]">
+        <h2 className="font-semibold mb-2">Past Sessions</h2>
+        {sessions.length === 0 && <p className="text-gray-500 text-sm">No sessions yet</p>}
+        <ul className="space-y-2">
+          {sessions.map((session) => (
             <li
-              key={s.id}
-              className="p-2 bg-white rounded shadow cursor-pointer hover:bg-gray-100 text-sm"
-              onClick={() => loadSession(s)}
+              key={session.id}
+              className="flex justify-between items-center p-2 bg-white rounded shadow hover:bg-gray-100 cursor-pointer"
             >
-              {s.name}
+              <span onClick={() => loadSession(session)} className="truncate">
+                {session.createdAt.toLocaleString()}
+              </span>
+              <button
+                onClick={() => deleteSession(session.id)}
+                className="ml-2 px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600"
+              >
+                Delete
+              </button>
             </li>
           ))}
         </ul>
       </div>
 
-      {/* Chat Area */}
-      <div className="flex-1 flex flex-col bg-white shadow rounded overflow-hidden">
-        <div className="flex-1 p-4 overflow-y-auto">
+      {/* Chat Window */}
+      <div className="flex-1 flex flex-col bg-white shadow-md rounded-lg h-[500px] overflow-hidden">
+        <div className="flex-1 p-4 overflow-y-auto bg-gray-50">
           {messages.map((msg, index) => (
             <div
               key={index}
-              className={`mb-3 flex ${
-                msg.role === "user" ? "justify-end" : "justify-start"
-              }`}
+              className={`mb-3 flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
                 className={`px-4 py-2 max-w-[75%] rounded-lg text-sm whitespace-pre-wrap ${
@@ -154,14 +175,13 @@ export default function AiChat() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
-        <div className="p-3 border-t flex gap-2">
+        <div className="p-3 border-t bg-white flex gap-2">
           <input
             type="text"
             value={input}
             disabled={loading}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+            onKeyDown={onKeyPress}
             placeholder="Ask the AI something..."
             className="flex-1 px-3 py-2 border rounded-md focus:outline-none focus:ring focus:ring-blue-300"
           />
