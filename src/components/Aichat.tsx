@@ -33,23 +33,27 @@ interface Session {
 
 export default function AiChat() {
   const [messages, setMessages] = useState<Message[]>([]);
+  const messagesRef = useRef<Message[]>(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(undefined);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const db = getFirestore(app);
   const auth = getAuth(app);
   const user = auth.currentUser;
 
-  // Auto-scroll
+  // Auto-scroll on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Fetch sessions for user
+  // Fetch sessions for user on mount / when user changes
   useEffect(() => {
     if (!user) return;
 
@@ -93,10 +97,10 @@ export default function AiChat() {
   const renderTextAsParagraphs = (text: string) =>
     text.split("\n\n").map((block, i) => (
       <p key={i} className="mb-2 leading-relaxed text-sm">
-        {block.split("\n").map((line, idx) => (
+        {block.split("\n").map((line, idx, arr) => (
           <span key={idx}>
             {line}
-            {idx < block.split("\n").length - 1 && <br />}
+            {idx < arr.length - 1 && <br />}
           </span>
         ))}
       </p>
@@ -105,7 +109,7 @@ export default function AiChat() {
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      // Replace with your toast if you have one
+      // replace with toast if you have one
       // eslint-disable-next-line no-alert
       alert("Copied to clipboard");
     } catch (err) {
@@ -113,7 +117,7 @@ export default function AiChat() {
     }
   };
 
-  // Save or update session in Firestore (returns sessionId)
+  // Save or update session in Firestore (returns sessionId or null)
   const saveOrCreateSession = async (messagesToSave: Message[], sessionId?: string) => {
     if (!user) {
       console.warn("No user: session not saved");
@@ -150,7 +154,7 @@ export default function AiChat() {
       alert("You must be signed in to create a session.");
       return;
     }
-    setMessages([]); // clear UI
+    setMessages([]);
     setLoading(false);
     try {
       const sessionsCol = collection(db, "users", user.uid, "sessions");
@@ -175,8 +179,14 @@ export default function AiChat() {
     if (!input.trim() || loading) return;
 
     const userMessage: Message = { role: "user", text: input.trim(), createdAt: new Date().toISOString() };
-    // Optimistic UI update
-    setMessages((prev) => [...prev, userMessage]);
+
+    // Optimistic: push user message to UI
+    setMessages((prev) => {
+      const afterUser = [...prev, userMessage];
+      messagesRef.current = afterUser;
+      return afterUser;
+    });
+
     setLoading(true);
 
     try {
@@ -194,16 +204,13 @@ export default function AiChat() {
 
       const aiMessage: Message = { role: "ai", text: data.reply || "No response from AI.", createdAt: new Date().toISOString() };
 
-      // Update UI with AI response
-      setMessages((prev) => {
-        const newMessages = [...prev, aiMessage];
-        return newMessages;
-      });
+      // Append AI message to UI (use the latest messagesRef to avoid stale state)
+      const newMessages = [...messagesRef.current, aiMessage];
+      setMessages(newMessages);
+      messagesRef.current = newMessages;
 
-      // Save / append to Firestore session
-      const messagesToSave = [...(messages.length ? messages : []), userMessage, aiMessage];
-      // Note: messages state may be stale in closure; using messages variable is okay because we then add userMessage and aiMessage
-      const savedId = await saveOrCreateSession(messagesToSave, currentSessionId);
+      // Save/append to Firestore session
+      const savedId = await saveOrCreateSession(newMessages, currentSessionId);
       if (savedId && !currentSessionId) {
         setCurrentSessionId(savedId);
       }
@@ -212,7 +219,7 @@ export default function AiChat() {
       if (savedId) {
         setSessions((prev) => {
           const existingIndex = prev.findIndex((s) => s.id === savedId);
-          const sessionObj: Session = { id: savedId, createdAt: new Date(), messages: messagesToSave, name: `Session ${new Date().toLocaleString()}` };
+          const sessionObj: Session = { id: savedId, createdAt: new Date(), messages: newMessages, name: `Session ${new Date().toLocaleString()}` };
           if (existingIndex >= 0) {
             const copy = [...prev];
             copy[existingIndex] = sessionObj;
@@ -224,6 +231,7 @@ export default function AiChat() {
     } catch (err) {
       console.error("AI Chat Error:", err);
       setMessages((prev) => [...prev, { role: "ai", text: "⚠️ An error occurred while contacting the AI service.", createdAt: new Date().toISOString() }]);
+      messagesRef.current = messagesRef.current.concat({ role: "ai", text: "⚠️ An error occurred while contacting the AI service.", createdAt: new Date().toISOString() });
     } finally {
       setInput("");
       setLoading(false);
@@ -236,6 +244,7 @@ export default function AiChat() {
 
   const loadSession = (session: Session) => {
     setMessages(session.messages);
+    messagesRef.current = session.messages;
     setCurrentSessionId(session.id);
   };
 
@@ -250,11 +259,28 @@ export default function AiChat() {
 
       if (currentSessionId === sessionId) {
         setMessages([]);
+        messagesRef.current = [];
         setCurrentSessionId(undefined);
       }
     } catch (err) {
       console.error("Error deleting session:", err);
       alert("Could not delete session. Check console.");
+    }
+  };
+
+  // Rename a session
+  const renameSession = async (sessionId: string) => {
+    if (!user) return;
+    const newName = prompt("Enter new session name:");
+    if (!newName) return;
+
+    try {
+      const sessionRef = doc(db, "users", user.uid, "sessions", sessionId);
+      await updateDoc(sessionRef, { name: newName, updatedAt: serverTimestamp() });
+      setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, name: newName } : s)));
+    } catch (err) {
+      console.error("Error renaming session:", err);
+      alert("Could not rename session. Check console.");
     }
   };
 
@@ -264,12 +290,14 @@ export default function AiChat() {
       <aside className="w-full md:w-72 bg-gray-50 p-3 rounded-md shadow-md overflow-y-auto max-h-[700px]">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold">Past Sessions</h2>
-          <button
-            onClick={startNewSession}
-            className="text-sm px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
-          >
-            New
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={startNewSession}
+              className="text-sm px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
+            >
+              New
+            </button>
+          </div>
         </div>
 
         {sessions.length === 0 ? (
@@ -278,13 +306,20 @@ export default function AiChat() {
           <ul className="space-y-2">
             {sessions.map((session) => (
               <li key={session.id} className="flex items-center justify-between p-2 bg-white rounded shadow hover:bg-gray-100">
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 pr-2">
                   <button onClick={() => loadSession(session)} className="text-left truncate w-full">
                     {session.name ?? session.createdAt.toLocaleString()}
                   </button>
                   <div className="text-xs text-gray-400">{session.createdAt.toLocaleString()}</div>
                 </div>
                 <div className="flex items-center gap-2 ml-2">
+                  <button
+                    onClick={() => renameSession(session.id)}
+                    className="px-2 py-1 text-xs bg-yellow-400 text-white rounded hover:bg-yellow-500"
+                    title="Rename session"
+                  >
+                    Rename
+                  </button>
                   <button
                     onClick={() => deleteSession(session.id)}
                     className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600"
@@ -312,9 +347,7 @@ export default function AiChat() {
             <h3 className="text-lg font-semibold">AI Tutor</h3>
             <p className="text-xs text-gray-500">Ask questions — multi-message sessions are saved automatically.</p>
           </div>
-          <div className="text-sm text-gray-400">
-            {currentSessionId ? "Session active" : "No session selected"}
-          </div>
+          <div className="text-sm text-gray-400">{currentSessionId ? "Session active" : "No session selected"}</div>
         </div>
 
         {/* Messages */}
