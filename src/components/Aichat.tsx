@@ -1,18 +1,34 @@
 // src/components/AiChat.tsx
 import { useState, useRef, useEffect } from "react";
-import { getFirestore, collection, addDoc, query, orderBy, getDocs, deleteDoc, doc } from "firebase/firestore";
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  getDocs,
+  deleteDoc,
+  doc,
+  updateDoc,
+  serverTimestamp,
+  DocumentData,
+  DocumentReference,
+} from "firebase/firestore";
 import { getAuth } from "firebase/auth";
-import { app } from "@/lib/firebase"; // your firebase app initialization
+import { app } from "@/lib/firebase";
+import LogoutButton from "@/components/LogoutButton";
 
 interface Message {
   role: "user" | "ai";
   text: string;
+  createdAt?: string;
 }
 
 interface Session {
   id: string;
   createdAt: Date;
   messages: Message[];
+  name?: string;
 }
 
 export default function AiChat() {
@@ -20,44 +36,146 @@ export default function AiChat() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(undefined);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const db = getFirestore(app);
-  const user = getAuth().currentUser;
+  const auth = getAuth(app);
+  const user = auth.currentUser;
 
-  // Auto-scroll on new messages
+  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Load sessions on mount
+  // Fetch sessions for user
   useEffect(() => {
     if (!user) return;
 
     const fetchSessions = async () => {
-      const q = query(
-        collection(db, "users", user.uid, "sessions"),
-        orderBy("createdAt", "desc")
-      );
-      const snapshot = await getDocs(q);
-      const loaded: Session[] = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        createdAt: doc.data().createdAt.toDate(),
-        messages: doc.data().messages,
-      }));
-      setSessions(loaded);
+      try {
+        const q = query(
+          collection(db, "users", user.uid, "sessions"),
+          orderBy("createdAt", "desc")
+        );
+        const snapshot = await getDocs(q);
+        const loaded: Session[] = snapshot.docs.map((d) => {
+          const data = d.data() as DocumentData;
+          return {
+            id: d.id,
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+            messages: (data.messages || []) as Message[],
+            name: data.name,
+          };
+        });
+        setSessions(loaded);
+      } catch (err) {
+        console.error("Failed to fetch sessions:", err);
+      }
     };
 
     fetchSessions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
+  // Helpers
+  const formatTime = (iso?: string) => {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return "";
+    }
+  };
 
-  //Sending a message
+  const renderTextAsParagraphs = (text: string) =>
+    text.split("\n\n").map((block, i) => (
+      <p key={i} className="mb-2 leading-relaxed text-sm">
+        {block.split("\n").map((line, idx) => (
+          <span key={idx}>
+            {line}
+            {idx < block.split("\n").length - 1 && <br />}
+          </span>
+        ))}
+      </p>
+    ));
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      // Replace with your toast if you have one
+      // eslint-disable-next-line no-alert
+      alert("Copied to clipboard");
+    } catch (err) {
+      console.error("Copy failed", err);
+    }
+  };
+
+  // Save or update session in Firestore (returns sessionId)
+  const saveOrCreateSession = async (messagesToSave: Message[], sessionId?: string) => {
+    if (!user) {
+      console.warn("No user: session not saved");
+      return null;
+    }
+
+    try {
+      if (sessionId) {
+        const sessionRef = doc(db, "users", user.uid, "sessions", sessionId);
+        await updateDoc(sessionRef, {
+          messages: messagesToSave,
+          updatedAt: serverTimestamp(),
+        });
+        return sessionId;
+      } else {
+        const sessionsCol = collection(db, "users", user.uid, "sessions");
+        const docRef = await addDoc(sessionsCol, {
+          name: `Session ${new Date().toLocaleString()}`,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          messages: messagesToSave,
+        });
+        return (docRef as DocumentReference).id;
+      }
+    } catch (err) {
+      console.error("saveOrCreateSession error:", err);
+      return null;
+    }
+  };
+
+  // Start a brand new session (creates empty session doc, selects it)
+  const startNewSession = async () => {
+    if (!user) {
+      alert("You must be signed in to create a session.");
+      return;
+    }
+    setMessages([]); // clear UI
+    setLoading(false);
+    try {
+      const sessionsCol = collection(db, "users", user.uid, "sessions");
+      const docRef = await addDoc(sessionsCol, {
+        name: `Session ${new Date().toLocaleString()}`,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        messages: [],
+      });
+      const newId = (docRef as DocumentReference).id;
+      setCurrentSessionId(newId);
+      // Prepend new session to local list
+      setSessions((prev) => [{ id: newId, createdAt: new Date(), messages: [], name: `Session ${new Date().toLocaleString()}` }, ...prev]);
+    } catch (err) {
+      console.error("Failed to start new session:", err);
+      alert("Could not start new session. Check console.");
+    }
+  };
+
+  // Send message -> call AI -> append to messages -> save session (append)
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
 
-    const userMessage: Message = { role: "user", text: input.trim() };
+    const userMessage: Message = { role: "user", text: input.trim(), createdAt: new Date().toISOString() };
+    // Optimistic UI update
     setMessages((prev) => [...prev, userMessage]);
     setLoading(true);
 
@@ -72,36 +190,46 @@ export default function AiChat() {
       });
 
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
-
       const data: { reply: string } = await res.json();
-      const aiMessage: Message = { role: "ai", text: data.reply || "No response from AI." };
 
-      setMessages((prev) => [...prev, aiMessage]);
+      const aiMessage: Message = { role: "ai", text: data.reply || "No response from AI.", createdAt: new Date().toISOString() };
 
-      // Save session
-      if (user) {
-        const messagesToSave = [...messages, userMessage, aiMessage];
-        const sessionRef = currentSessionId
-          ? doc(db, "users", user.uid, "sessions", currentSessionId)
-          : await addDoc(collection(db, "users", user.uid, "sessions"), {
-              createdAt: new Date(),
-              messages: messagesToSave,
-            });
+      // Update UI with AI response
+      setMessages((prev) => {
+        const newMessages = [...prev, aiMessage];
+        return newMessages;
+      });
 
-        if (!currentSessionId) setCurrentSessionId(sessionRef.id);
+      // Save / append to Firestore session
+      const messagesToSave = [...(messages.length ? messages : []), userMessage, aiMessage];
+      // Note: messages state may be stale in closure; using messages variable is okay because we then add userMessage and aiMessage
+      const savedId = await saveOrCreateSession(messagesToSave, currentSessionId);
+      if (savedId && !currentSessionId) {
+        setCurrentSessionId(savedId);
       }
-    } catch (error) {
-      console.error("AI Chat Error:", error);
-      setMessages((prev) => [
-        ...prev,
-        { role: "ai", text: "⚠️ An error occurred while contacting the AI service, check your internet provider and try again." },
-      ]);
-    }
 
-    setInput("");
-    setLoading(false);
+      // Update local sessions list optimistically
+      if (savedId) {
+        setSessions((prev) => {
+          const existingIndex = prev.findIndex((s) => s.id === savedId);
+          const sessionObj: Session = { id: savedId, createdAt: new Date(), messages: messagesToSave, name: `Session ${new Date().toLocaleString()}` };
+          if (existingIndex >= 0) {
+            const copy = [...prev];
+            copy[existingIndex] = sessionObj;
+            return copy;
+          }
+          return [sessionObj, ...prev];
+        });
+      }
+    } catch (err) {
+      console.error("AI Chat Error:", err);
+      setMessages((prev) => [...prev, { role: "ai", text: "⚠️ An error occurred while contacting the AI service.", createdAt: new Date().toISOString() }]);
+    } finally {
+      setInput("");
+      setLoading(false);
+    }
   };
-//Pressing Enter triggers sending a message
+
   const onKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") sendMessage();
   };
@@ -113,91 +241,143 @@ export default function AiChat() {
 
   const deleteSession = async (sessionId: string) => {
     if (!user) return;
+    // eslint-disable-next-line no-alert
     if (!confirm("Are you sure you want to delete this session?")) return;
 
     try {
       await deleteDoc(doc(db, "users", user.uid, "sessions", sessionId));
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
 
-      // Clear chat if deleted session is currently loaded
       if (currentSessionId === sessionId) {
         setMessages([]);
-        setCurrentSessionId(null);
+        setCurrentSessionId(undefined);
       }
-    } catch (error) {
-      console.error("Error deleting session:", error);
+    } catch (err) {
+      console.error("Error deleting session:", err);
+      alert("Could not delete session. Check console.");
     }
   };
 
   return (
-    <div className="flex flex-col md:flex-row w-full max-w-5xl mx-auto p-4 gap-4">
-      {/* Sidebar: Sessions */}
-      <div className="w-full md:w-64 bg-gray-50 p-3 rounded-md shadow-md overflow-y-auto max-h-[500px]">
-        <h2 className="font-semibold mb-2">Past Sessions</h2>
-        {sessions.length === 0 && <p className="text-gray-500 text-sm">No sessions yet</p>}
-        <ul className="space-y-2">
-          {sessions.map((session) => (
-            <li
-              key={session.id}
-              className="flex justify-between items-center p-2 bg-white rounded shadow hover:bg-gray-100 cursor-pointer"
-            >
-              <span onClick={() => loadSession(session)} className="truncate">
-                {session.createdAt.toLocaleString()}
-              </span>
-              <button
-                onClick={() => deleteSession(session.id)}
-                className="ml-2 px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600"
-              >
-                Delete
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
+    <div className="flex flex-col md:flex-row w-full max-w-6xl mx-auto p-4 gap-4">
+      {/* Sessions sidebar */}
+      <aside className="w-full md:w-72 bg-gray-50 p-3 rounded-md shadow-md overflow-y-auto max-h-[700px]">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold">Past Sessions</h2>
+          <button
+            onClick={startNewSession}
+            className="text-sm px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
+          >
+            New
+          </button>
+        </div>
 
-      {/* Chat Window */}
-      <div className="flex-1 flex flex-col bg-white shadow-md rounded-lg h-[500px] overflow-hidden">
-        <div className="flex-1 p-4 overflow-y-auto bg-gray-50">
-          {messages.map((msg, index) => (
-            <div
-              key={index}
-              className={`mb-3 flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-            >
-              <div
-                className={`px-4 py-2 max-w-[75%] rounded-lg text-sm whitespace-pre-wrap ${
-                  msg.role === "user"
-                    ? "bg-blue-600 text-white rounded-br-none"
-                    : "bg-gray-200 text-gray-800 rounded-bl-none"
-                }`}
-              >
-                {msg.text}
-              </div>
-            </div>
-          ))}
+        {sessions.length === 0 ? (
+          <p className="text-gray-500 text-sm">No sessions yet — click “New” to start.</p>
+        ) : (
+          <ul className="space-y-2">
+            {sessions.map((session) => (
+              <li key={session.id} className="flex items-center justify-between p-2 bg-white rounded shadow hover:bg-gray-100">
+                <div className="flex-1 min-w-0">
+                  <button onClick={() => loadSession(session)} className="text-left truncate w-full">
+                    {session.name ?? session.createdAt.toLocaleString()}
+                  </button>
+                  <div className="text-xs text-gray-400">{session.createdAt.toLocaleString()}</div>
+                </div>
+                <div className="flex items-center gap-2 ml-2">
+                  <button
+                    onClick={() => deleteSession(session.id)}
+                    className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600"
+                    title="Delete session"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </aside>
+
+      {/* Chat area */}
+      <main className="flex-1 flex flex-col bg-white shadow-md rounded-lg h-[700px] overflow-hidden relative">
+        {/* Visible Logout in top-right */}
+        <div className="absolute top-4 right-4 z-20">
+          <LogoutButton redirectTo="/login" />
+        </div>
+
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b">
+          <div>
+            <h3 className="text-lg font-semibold">AI Tutor</h3>
+            <p className="text-xs text-gray-500">Ask questions — multi-message sessions are saved automatically.</p>
+          </div>
+          <div className="text-sm text-gray-400">
+            {currentSessionId ? "Session active" : "No session selected"}
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 p-4 overflow-y-auto bg-gradient-to-b from-white to-gray-50">
+          <div className="space-y-6">
+            {messages.map((msg, i) =>
+              msg.role === "user" ? (
+                <div key={i} className="flex justify-end">
+                  <div className="max-w-[78%] bg-blue-600 text-white px-4 py-3 rounded-2xl rounded-br-none shadow transform transition-all">
+                    <div className="text-sm whitespace-pre-wrap">{msg.text}</div>
+                    <div className="text-xs text-blue-100 mt-2 flex justify-end">{formatTime(msg.createdAt)}</div>
+                  </div>
+                </div>
+              ) : (
+                <div key={i} className="flex items-start gap-3">
+                  <div className="flex-shrink-0 mt-1">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center text-white font-semibold shadow-md">
+                      AI
+                    </div>
+                  </div>
+
+                  <div className="flex-1">
+                    <div className="relative bg-white border border-indigo-50 rounded-xl p-4 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-block text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">Assistant</span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400 hidden sm:inline">{formatTime(msg.createdAt)}</span>
+                          <button onClick={() => copyToClipboard(msg.text)} className="text-indigo-600 hover:text-indigo-800 text-sm px-2 py-1 rounded-md" aria-label="Copy reply">
+                            Copy
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 text-sm text-gray-800 leading-relaxed">{renderTextAsParagraphs(msg.text)}</div>
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
+          </div>
+
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="p-3 border-t bg-white flex gap-2">
+        {/* Input */}
+        <div className="p-4 border-t bg-white flex gap-3 items-center">
           <input
+            className="flex-1 px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200"
             type="text"
             value={input}
             disabled={loading}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyPress}
             placeholder="Ask the AI something..."
-            className="flex-1 px-3 py-2 border rounded-md focus:outline-none focus:ring focus:ring-blue-300"
           />
-          <button
-            onClick={sendMessage}
-            disabled={loading}
-            className={`px-4 py-2 rounded-md text-white ${
-              loading ? "bg-gray-400" : "bg-blue-600 hover:bg-blue-700"
-            }`}
-          >
+          <button onClick={sendMessage} disabled={loading} className={`px-6 py-3 rounded-xl text-white font-medium shadow ${loading ? "bg-gray-400" : "bg-indigo-600 hover:bg-indigo-700"}`}>
             {loading ? "..." : "Send"}
           </button>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
