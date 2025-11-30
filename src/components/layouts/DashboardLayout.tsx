@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState } from "react"; 
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { Menu, X } from "lucide-react";
@@ -22,20 +22,20 @@ export default function DashboardLayout({ children }: LayoutProps) {
   ];
 
   return (
-    <div className="flex min-h-screen bg-gray-100">
+    <div className="flex min-h-screen bg-gray-100 dark:bg-gray-900">
       {/* Sidebar */}
       <aside
-        className={`bg-white border-r shadow-sm transition-all duration-300 ${
+        className={`bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 shadow-sm transition-all duration-300 ${
           open ? "w-64" : "w-20"
         }`}
       >
-        <div className="flex items-center justify-between px-4 py-4 border-b">
-          <h1 className={`text-lg font-semibold ${!open && "hidden"}`}>
+        <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h1 className={`text-lg font-semibold text-gray-900 dark:text-white ${!open && "hidden"}`}>
             LMS Dashboard
           </h1>
 
           <button
-            className="p-2 rounded hover:bg-gray-200"
+            className="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
             onClick={() => setOpen(!open)}
           >
             {open ? <X size={20} /> : <Menu size={20} />}
@@ -49,10 +49,10 @@ export default function DashboardLayout({ children }: LayoutProps) {
             return (
               <Link href={item.path} key={item.path}>
                 <div
-                  className={`cursor-pointer px-4 py-3 text-sm font-medium transition ${
+                  className={`cursor-pointer px-4 py-3 text-sm font-medium transition rounded ${
                     active
                       ? "bg-blue-600 text-white"
-                      : "text-gray-700 hover:bg-gray-200"
+                      : "text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
                   }`}
                 >
                   {open ? item.name : item.name[0]}
@@ -66,20 +66,22 @@ export default function DashboardLayout({ children }: LayoutProps) {
       {/* Main content */}
       <main className="flex-1">
         {/* Top Navigation */}
-        <header className="bg-white h-16 shadow-sm px-6 flex items-center justify-between">
-          <h1 className="text-xl font-semibold">
+        <header className="bg-white dark:bg-gray-800 h-16 shadow-sm px-6 flex items-center justify-between border-b border-gray-200 dark:border-gray-700">
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
             {menuItems.find((x) => router.pathname.startsWith(x.path))?.name}
           </h1>
 
           <div className="flex items-center gap-3">
             <ThemeToggle />
-            <span className="text-sm font-medium">Kennedy</span>
-            <div className="h-10 w-10 rounded-full bg-gray-300"></div>
+            <span className="text-sm font-medium text-gray-900 dark:text-white">Kennedy</span>
+            <div className="h-10 w-10 rounded-full bg-gray-300 dark:bg-gray-600"></div>
           </div>
         </header>
 
         {/* Page Content */}
-        <div className="p-6">{children}</div>
+        <div className="p-6 bg-gray-100 dark:bg-gray-900 min-h-[calc(100vh-4rem)]">
+          {children}
+        </div>
       </main>
     </div>
   );

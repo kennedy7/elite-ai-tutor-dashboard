@@ -43,10 +43,12 @@ function readQueue(): QueueItem[] {
     return [];
   }
 }
+
 function writeQueue(q: QueueItem[]) {
   if (typeof window === "undefined") return;
   localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
 }
+
 function enqueueQueue(payload: QueueItem["payload"]) {
   const q = readQueue();
   const item: QueueItem = {
@@ -59,6 +61,7 @@ function enqueueQueue(payload: QueueItem["payload"]) {
   writeQueue(q);
   return item.id;
 }
+
 function dequeueQueue(id: string) {
   const q = readQueue();
   const filtered = q.filter((i) => i.id !== id);
@@ -161,11 +164,9 @@ export default function AiChat() {
           toast.success("Queued session saved");
         } catch (err) {
           console.warn("Retry failed for queued item", item.id, err);
-          // increment retry count
           const current = readQueue();
           const updated = current.map((it) => (it.id === item.id ? { ...it, retries: (it.retries || 0) + 1 } : it));
           writeQueue(updated);
-          // If retries too many, drop it to avoid infinite loop
           const updatedItem = updated.find((it) => it.id === item.id);
           if ((updatedItem?.retries ?? 0) > 5) {
             dequeueQueue(item.id);
@@ -175,10 +176,7 @@ export default function AiChat() {
       }
     }
 
-    // flush now
     flushQueue();
-
-    // flush when online
     const onOnline = () => flushQueue();
     window.addEventListener("online", onOnline);
 
@@ -189,7 +187,6 @@ export default function AiChat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // Helpers
   const formatTime = (iso?: string) => {
     if (!iso) return "";
     try {
@@ -222,7 +219,6 @@ export default function AiChat() {
     }
   };
 
-  // Save or update session in Firestore (returns sessionId or null)
   const saveOrCreateSession = async (messagesToSave: Message[], sessionId?: string) => {
     if (!user) {
       console.warn("No user: session not saved");
@@ -252,7 +248,6 @@ export default function AiChat() {
       }
     } catch (err) {
       console.error("saveOrCreateSession error:", err);
-      // enqueue for offline retry
       try {
         enqueueQueue({ userId: user.uid, sessionId, messages: messagesToSave });
         toast("Saved to offline queue — will retry when online", { icon: "💾" });
@@ -264,7 +259,6 @@ export default function AiChat() {
     }
   };
 
-  // Start a brand new session (creates empty session doc, selects it)
   const startNewSession = async () => {
     if (!user) {
       toast.error("You must be signed in to create a session.");
@@ -282,23 +276,18 @@ export default function AiChat() {
       });
       const newId = (docRef as DocumentReference).id;
       setCurrentSessionId(newId);
-      // Prepend new session to local list
       setSessions((prev) => [{ id: newId, createdAt: new Date(), messages: [], name: `Session ${new Date().toLocaleString()}` }, ...prev]);
       toast.success("New session started");
     } catch (err) {
       console.error("Failed to start new session:", err);
-      // enqueue empty session creation? simpler: notify user
       toast.error("Could not start new session. Check console.");
     }
   };
 
-  // Send message -> call AI -> append to messages -> save session (append)
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
 
     const userMessage: Message = { role: "user", text: input.trim(), createdAt: new Date().toISOString() };
-
-    // Optimistic: push user message to UI
     setMessages((prev) => {
       const afterUser = [...prev, userMessage];
       messagesRef.current = afterUser;
@@ -321,19 +310,13 @@ export default function AiChat() {
       const data: { reply: string } = await res.json();
 
       const aiMessage: Message = { role: "ai", text: data.reply || "No response from AI.", createdAt: new Date().toISOString() };
-
-      // Append AI message to UI (use the latest messagesRef to avoid stale state)
       const newMessages = [...messagesRef.current, aiMessage];
       setMessages(newMessages);
       messagesRef.current = newMessages;
 
-      // Save/append to Firestore session, fallback to offline queue on failure
       const savedId = await saveOrCreateSession(newMessages, currentSessionId);
-      if (savedId && !currentSessionId) {
-        setCurrentSessionId(savedId);
-      }
+      if (savedId && !currentSessionId) setCurrentSessionId(savedId);
 
-      // Update local sessions list optimistically
       if (savedId) {
         setSessions((prev) => {
           const existingIndex = prev.findIndex((s) => s.id === savedId);
@@ -370,13 +353,11 @@ export default function AiChat() {
 
   const deleteSession = async (sessionId: string) => {
     if (!user) return;
-    // eslint-disable-next-line no-alert
     if (!confirm("Are you sure you want to delete this session?")) return;
 
     try {
       await deleteDoc(doc(db, "users", user.uid, "sessions", sessionId));
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-
       if (currentSessionId === sessionId) {
         setMessages([]);
         messagesRef.current = [];
@@ -385,12 +366,10 @@ export default function AiChat() {
       toast.success("Session deleted");
     } catch (err) {
       console.error("Error deleting session:", err);
-      // if delete fails, enqueue? we'll just notify
       toast.error("Could not delete session. Check console.");
     }
   };
 
-  // Rename a session
   const renameSession = async (sessionId: string) => {
     if (!user) return;
     const newName = prompt("Enter new session name:");
@@ -411,9 +390,9 @@ export default function AiChat() {
     <DashboardLayout>
       <div className="flex flex-col md:flex-row w-full max-w-6xl mx-auto p-4 gap-4">
         {/* Sessions sidebar */}
-        <aside className="w-full md:w-72 bg-gray-50 p-3 rounded-md shadow-md overflow-y-auto max-h-[700px]">
+        <aside className="w-full md:w-72 bg-gray-50 dark:bg-gray-800 p-3 rounded-md shadow-md overflow-y-auto max-h-[700px]">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold">Past Sessions</h2>
+            <h2 className="font-semibold text-gray-900 dark:text-white">Past Sessions</h2>
             <div className="flex items-center gap-2">
               <button
                 onClick={startNewSession}
@@ -425,16 +404,16 @@ export default function AiChat() {
           </div>
 
           {sessions.length === 0 ? (
-            <p className="text-gray-500 text-sm">No sessions yet — click “New” to start.</p>
+            <p className="text-gray-500 dark:text-gray-300 text-sm">No sessions yet — click “New” to start.</p>
           ) : (
             <ul className="space-y-2">
               {sessions.map((session) => (
-                <li key={session.id} className="flex items-center justify-between p-2 bg-white rounded shadow hover:bg-gray-100">
+                <li key={session.id} className="flex items-center justify-between p-2 bg-white dark:bg-gray-700 rounded shadow hover:bg-gray-100 dark:hover:bg-gray-600">
                   <div className="flex-1 min-w-0 pr-2">
-                    <button onClick={() => loadSession(session)} className="text-left truncate w-full">
+                    <button onClick={() => loadSession(session)} className="text-left truncate w-full text-gray-900 dark:text-gray-100">
                       {session.name ?? session.createdAt.toLocaleString()}
                     </button>
-                    <div className="text-xs text-gray-400">{session.createdAt.toLocaleString()}</div>
+                    <div className="text-xs text-gray-400 dark:text-gray-300">{session.createdAt.toLocaleString()}</div>
                   </div>
                   <div className="flex items-center gap-2 ml-2">
                     <button
@@ -459,23 +438,20 @@ export default function AiChat() {
         </aside>
 
         {/* Chat area */}
-        <main className="flex-1 flex flex-col bg-white shadow-md rounded-lg h-[700px] overflow-hidden relative">
-          {/* Visible Logout in top-right */}
+        <main className="flex-1 flex flex-col bg-white dark:bg-gray-800 shadow-md rounded-lg h-[700px] overflow-hidden relative">
           <div className="absolute top-4 right-4 z-20">
             <LogoutButton redirectTo="/login" />
           </div>
 
-          {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b">
+          <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
             <div>
-              <h3 className="text-lg font-semibold">AI Tutor</h3>
-              <p className="text-xs text-gray-500">Ask questions — multi-message sessions are saved automatically.</p>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">AI Tutor</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-300">Ask questions — multi-message sessions are saved automatically.</p>
             </div>
-            <div className="text-sm text-gray-400">{currentSessionId ? "Session active" : "No session selected"}</div>
+            <div className="text-sm text-gray-400 dark:text-gray-300">{currentSessionId ? "Session active" : "No session selected"}</div>
           </div>
 
-          {/* Messages */}
-          <div className="flex-1 p-4 overflow-y-auto bg-gradient-to-b from-white to-gray-50">
+          <div className="flex-1 p-4 overflow-y-auto bg-gradient-to-b from-white to-gray-50 dark:from-gray-800 dark:to-gray-900">
             <div className="space-y-6">
               {messages.map((msg, i) =>
                 msg.role === "user" ? (
@@ -494,21 +470,21 @@ export default function AiChat() {
                     </div>
 
                     <div className="flex-1">
-                      <div className="relative bg-white border border-indigo-50 rounded-xl p-4 shadow-sm">
+                      <div className="relative bg-white dark:bg-gray-700 border border-indigo-50 dark:border-gray-600 rounded-xl p-4 shadow-sm">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-center gap-2">
-                            <span className="inline-block text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">Assistant</span>
+                            <span className="inline-block text-xs bg-indigo-50 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-200 px-2 py-0.5 rounded-full">Assistant</span>
                           </div>
 
                           <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-400 hidden sm:inline">{formatTime(msg.createdAt)}</span>
-                            <button onClick={() => copyToClipboard(msg.text)} className="text-indigo-600 hover:text-indigo-800 text-sm px-2 py-1 rounded-md" aria-label="Copy reply">
+                            <span className="text-xs text-gray-400 dark:text-gray-300 hidden sm:inline">{formatTime(msg.createdAt)}</span>
+                            <button onClick={() => copyToClipboard(msg.text)} className="text-indigo-600 dark:text-indigo-300 hover:text-indigo-800 dark:hover:text-indigo-100 text-sm px-2 py-1 rounded-md" aria-label="Copy reply">
                               Copy
                             </button>
                           </div>
                         </div>
 
-                        <div className="mt-3 text-sm text-gray-800 leading-relaxed">{renderTextAsParagraphs(msg.text)}</div>
+                        <div className="mt-3 text-sm text-gray-800 dark:text-gray-100 leading-relaxed">{renderTextAsParagraphs(msg.text)}</div>
                       </div>
                     </div>
                   </div>
@@ -519,10 +495,9 @@ export default function AiChat() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input */}
-          <div className="p-4 border-t bg-white flex gap-3 items-center">
+          <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex gap-3 items-center">
             <input
-              className="flex-1 px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              className="flex-1 px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400"
               type="text"
               value={input}
               disabled={loading}
@@ -536,7 +511,6 @@ export default function AiChat() {
           </div>
         </main>
 
-        {/* Toast container (react-hot-toast) */}
         <Toaster position="bottom-right" />
       </div>
     </DashboardLayout>
