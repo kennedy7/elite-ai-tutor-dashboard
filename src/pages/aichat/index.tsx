@@ -439,7 +439,7 @@ export default function AiChat() {
         {/* Chat area */}
         <main className="flex-1 flex flex-col bg-white dark:bg-gray-800 shadow-md rounded-lg h-[700px] overflow-hidden relative">
           <div className="absolute top-4 right-4 z-20">
-            <LogoutButton redirectTo="/login" />
+            <LogoutButton redirectTo="/auth/login" />
           </div>
 
           <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
