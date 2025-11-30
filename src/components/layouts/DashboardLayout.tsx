@@ -16,7 +16,7 @@ export default function DashboardLayout({ children }: LayoutProps) {
     { name: "Courses", path: "/courses" },
     { name: "Instructor", path: "/instructor" },
     { name: "Students", path: "/students" },
-    { name: "AI Chat", path: "/aichat" },
+    { name: "AI Chat", path: "/api/ai/aichat" },
     { name: "Settings", path: "/settings" },
   ];
 
