@@ -2,6 +2,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { Menu, X } from "lucide-react";
+import ThemeToggle from "@/components/ThemeToggle";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -16,7 +17,7 @@ export default function DashboardLayout({ children }: LayoutProps) {
     { name: "Courses", path: "/courses" },
     { name: "Instructor", path: "/instructor" },
     { name: "Students", path: "/students" },
-    { name: "AI Chat", path: "/api/ai/aichat" },
+    { name: "AI Chat", path: "aichat" },
     { name: "Settings", path: "/settings" },
   ];
 
@@ -71,6 +72,7 @@ export default function DashboardLayout({ children }: LayoutProps) {
           </h1>
 
           <div className="flex items-center gap-3">
+            <ThemeToggle />
             <span className="text-sm font-medium">Kennedy</span>
             <div className="h-10 w-10 rounded-full bg-gray-300"></div>
           </div>
