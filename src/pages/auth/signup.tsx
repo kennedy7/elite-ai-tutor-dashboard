@@ -39,6 +39,12 @@ export default function SignupPage() {
       <button type="submit" className="bg-blue-500 text-white p-2 rounded">
         Sign Up
       </button>
+       <p className="text-center text-sm text-gray-500 mt-4">
+          Have an account?{" "}
+          <a href="/auth/login" className="text-blue-600 hover:underline">
+            Login
+          </a>
+        </p>
     </form>
   );
 }
