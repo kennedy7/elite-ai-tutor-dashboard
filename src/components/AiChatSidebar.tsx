@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Menu, X } from "lucide-react";
-import AiChat from "./Aichat";
+import AiChat from "@/pages/aichat";
 
 export default function AiChatSidebar() {
   const [open, setOpen] = useState(true);
