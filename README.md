@@ -66,8 +66,20 @@ lms-ai-tutor/
 
 ## Demo
 
-> Will Insert screenshots or GIFs showing dashboard, dark mode, and AI chat here.  
 
+
+### Dashboard Preview
+![Dashboard Screenshot](public/screenshots/Dashboard-Light-Mode.png)
+
+### Dark Mode
+![Dark Mode Screenshot](public/screenshots/Dashboard-Dark-Mode.png)
+
+### AI Chat
+![AI Chat Screenshot](public/screenshots/Aichat.png)
+
+
+Dashboard-Dark-Mode
+  
 Example flow:  
 1. Admin signs in → `/dashboard`  
 2. View KPIs, charts, and recent activity  
