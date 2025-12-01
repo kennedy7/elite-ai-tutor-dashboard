@@ -2,6 +2,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { Menu, X } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -10,6 +12,7 @@ interface LayoutProps {
 export default function DashboardLayout({ children }: LayoutProps) {
   const [open, setOpen] = useState(true);
   const router = useRouter();
+  const { user } = useAuth();
 
   const menuItems = [
     { name: "Dashboard", path: "/dashboard" },
@@ -71,7 +74,7 @@ export default function DashboardLayout({ children }: LayoutProps) {
           </h1>
 
           <div className="flex items-center gap-3">
-            <span className="text-sm font-medium">Kennedy</span>
+            <span className="text-sm font-medium">{user?.email ?? "Guest"}</span>
             <div className="h-10 w-10 rounded-full bg-gray-300"></div>
           </div>
         </header>
