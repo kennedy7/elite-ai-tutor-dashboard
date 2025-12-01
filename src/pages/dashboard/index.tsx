@@ -1,87 +1,98 @@
-import { useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/router";
-import { Menu, X } from "lucide-react";
+"use client";
+
+import DashboardLayout from "@/components/layouts/DashboardLayout";
 import { useAuth } from "@/hooks/useAuth";
+import { useEffect, useState } from "react";
 
+export default function DashboardHome() {
+  const { user, loading } = useAuth();
 
-interface LayoutProps {
-  children: React.ReactNode;
-}
+  // Example stats — replace with API data later
+  const [stats] = useState([
+    { label: "Total Courses", value: 12 },
+    { label: "Enrolled Students", value: 87 },
+    { label: "Messages", value: 34 },
+    { label: "AI Chats", value: 152 },
+  ]);
 
-export default function DashboardLayout({ children }: LayoutProps) {
-  const [open, setOpen] = useState(true);
-  const router = useRouter();
-  const { user } = useAuth();
-
-  const menuItems = [
-    { name: "Dashboard", path: "/dashboard" },
-    { name: "Courses", path: "/courses" },
-    { name: "Instructor", path: "/instructor" },
-    { name: "Students", path: "/students" },
-    { name: "AI Chat", path: "/aichat" },
-    { name: "Settings", path: "/settings" },
-  ];
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="p-6 animate-pulse">
+          <div className="h-8 w-48 bg-gray-300 dark:bg-gray-700 rounded"></div>
+          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-24 bg-gray-200 dark:bg-gray-800 rounded"></div>
+            ))}
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
-    <div className="flex min-h-screen bg-gray-100">
-      {/* Sidebar */}
-      <aside
-        className={`bg-white border-r shadow-sm transition-all duration-300 ${
-          open ? "w-64" : "w-20"
-        }`}
-      >
-        <div className="flex items-center justify-between px-4 py-4 border-b">
-          <h1 className={`text-lg font-semibold ${!open && "hidden"}`}>
-            LMS Dashboard
-          </h1>
+    <DashboardLayout>
+      <div className="p-6">
 
-          <button
-            className="p-2 rounded hover:bg-gray-200"
-            onClick={() => setOpen(!open)}
-          >
-            {open ? <X size={20} /> : <Menu size={20} />}
-          </button>
+        {/* Welcome */}
+        <h1 className="text-2xl font-semibold text-gray-800 dark:text-gray-100">
+          Welcome back, {user?.email?.split("@")[0] || "User"} 👋
+        </h1>
+
+        <p className="text-gray-500 dark:text-gray-400 mt-1">
+          Here’s what’s happening on your LMS today.
+        </p>
+
+        {/* Stats */}
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {stats.map((item) => (
+            <div
+              key={item.label}
+              className="
+                bg-white dark:bg-gray-800 
+                border border-gray-200 dark:border-gray-700 
+                rounded-xl p-5 shadow-sm
+              "
+            >
+              <div className="text-sm text-gray-500 dark:text-gray-400">{item.label}</div>
+              <div className="mt-2 text-2xl font-semibold text-gray-900 dark:text-gray-100">
+                {item.value}
+              </div>
+            </div>
+          ))}
         </div>
 
-        <nav className="mt-4 flex flex-col gap-1">
-          {menuItems.map((item) => {
-            const active = router.pathname.startsWith(item.path);
+        {/* Recent Activity */}
+        <div
+          className="
+            mt-10 p-6 bg-white dark:bg-gray-800 
+            border border-gray-200 dark:border-gray-700 
+            rounded-xl shadow-sm
+          "
+        >
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+            Recent Activity
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+            You can display upcoming courses, recent chats, logs, analytics, etc.
+          </p>
 
-            return (
-              <Link href={item.path} key={item.path}>
-                <div
-                  className={`cursor-pointer px-4 py-3 text-sm font-medium transition ${
-                    active
-                      ? "bg-blue-600 text-white"
-                      : "text-gray-700 hover:bg-gray-200"
-                  }`}
-                >
-                  {open ? item.name : item.name[0]}
-                </div>
-              </Link>
-            );
-          })}
-        </nav>
-      </aside>
-
-      {/* Main content */}
-      <main className="flex-1">
-        {/* Top Navigation */}
-        <header className="bg-white h-16 shadow-sm px-6 flex items-center justify-between">
-          <h1 className="text-xl font-semibold">
-            {menuItems.find((x) => router.pathname.startsWith(x.path))?.name}
-          </h1>
-
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium">{user?.email ?? "Guest"}</span>
-            <div className="h-10 w-10 rounded-full bg-gray-300"></div>
+          <div className="mt-4">
+            <ul className="space-y-3">
+              <li className="text-gray-700 dark:text-gray-300 text-sm">
+                • You enrolled 3 new students today.
+              </li>
+              <li className="text-gray-700 dark:text-gray-300 text-sm">
+                • AI assistant handled 12 conversations.
+              </li>
+              <li className="text-gray-700 dark:text-gray-300 text-sm">
+                • 2 new instructors joined this week.
+              </li>
+            </ul>
           </div>
-        </header>
+        </div>
 
-        {/* Page Content */}
-        <div className="p-6">{children}</div>
-      </main>
-    </div>
+      </div>
+    </DashboardLayout>
   );
 }

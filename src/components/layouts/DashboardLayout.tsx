@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import { Menu, X } from "lucide-react";
 import ThemeToggle from "@/components/ThemeToggle";
+import { useAuth } from "@/hooks/useAuth";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -11,6 +12,7 @@ interface LayoutProps {
 export default function DashboardLayout({ children }: LayoutProps) {
   const [open, setOpen] = useState(true);
   const router = useRouter();
+  const  { user } = useAuth();
 
   const menuItems = [
     { name: "Dashboard", path: "/dashboard" },
@@ -31,7 +33,7 @@ export default function DashboardLayout({ children }: LayoutProps) {
       >
         <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200 dark:border-gray-700">
           <h1 className={`text-lg font-semibold text-gray-900 dark:text-white ${!open && "hidden"}`}>
-            LMS Dashboard
+            ELITE AI TUTOR Dashboard
           </h1>
 
           <button
@@ -73,7 +75,7 @@ export default function DashboardLayout({ children }: LayoutProps) {
 
           <div className="flex items-center gap-3">
             <ThemeToggle />
-            <span className="text-sm font-medium text-gray-900 dark:text-white">Kennedy</span>
+            <span className="text-sm font-medium">{user?.email ?? "Guest"}</span>
             <div className="h-10 w-10 rounded-full bg-gray-300 dark:bg-gray-600"></div>
           </div>
         </header>
