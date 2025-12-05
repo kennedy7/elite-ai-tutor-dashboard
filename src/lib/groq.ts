@@ -57,15 +57,7 @@ export async function callGroq(prompt: string, opts?: { temperature?: number }) 
   const messages: Groq.Chat.Completions.ChatCompletionMessageParam[] = [
     {
       role: "system",
-     content:  `
-You are a friendly, smart conversational AI.
-- Maintain context across previous user messages and respond consistently.
-- Connect ideas from earlier in the conversation.
-- Ask follow-up questions when helpful.
-- Keep responses clear, accurate, and concise unless the user requests more detail.
-- Give examples when needed.
-- If the user is unclear, politely ask for clarification.
-  `,
+     content:  "You are a smart, friendly learning assistant. Explain concepts clearly and simply, give helpful examples when needed, and keep responses concise unless the user asks for more detail.",
     }, 
     {
       role: "user",
