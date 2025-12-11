@@ -40,7 +40,7 @@ function extractTextFromCompletion(completion: any): string {
       // try JSON stringify fallback
       return String(msg);
     }
-    // fallback: stringify everything for debugging
+    // fallback: stringify everything for debuggin
     return JSON.stringify(completion);
   } catch (err) {
     return "";
