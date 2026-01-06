@@ -18,6 +18,7 @@ import { app } from "@/lib/firebase";
 import LogoutButton from "@/components/LogoutButton";
 import toast, { Toaster } from "react-hot-toast";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
+import { useAuth } from "@/context/AuthProvider";
 
 /* ---------- simple offline queue (localStorage) ---------- */
 const QUEUE_KEY = "ai_session_save_queue_v1";
@@ -82,6 +83,7 @@ interface Session {
 }
 
 export default function AiChat() {
+  const { user: authUser, loading: authLoading } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const messagesRef = useRef<Message[]>(messages);
   useEffect(() => {
